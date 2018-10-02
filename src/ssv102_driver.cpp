@@ -1,5 +1,7 @@
 #include <ros/ros.h>
 #include <ros/console.h>
+#include <sensor_msgs/NavSatFix.h>
+#include <geometry_msgs/PoseStamped.h>
 
 #include <iostream>
 #include <thread>
@@ -34,6 +36,9 @@ public:
         std::string str = "Hello World\r\n";
         port.write_some(ba::buffer(str, str.length()));
         ba::async_read_until(port, buffer, delim, boost::bind(&Ssv102::rx_callback, this, ba::placeholders::error, ba::placeholders::bytes_transferred));
+
+        pub_navsat = nh.advertise<sensor_msgs::NavSatFix>("gps", 20);
+        pub_pose = nh.advertise<geometry_msgs::PoseStamped>("pose", 20);
     }
 
     ~Ssv102()
@@ -58,11 +63,24 @@ private:
             std::string line;
             std::getline(ins, line);
             std::cout << line << std::endl;
+
+            sensor_msgs::NavSatFix navsat;
+            geometry_msgs::PoseStamped pose;
+
+            pub_navsat.publish(navsat);
+            pub_pose.publish(pose);
+
             ba::async_read_until(port, buffer, delim, boost::bind(&Ssv102::rx_callback, this, ba::placeholders::error, ba::placeholders::bytes_transferred));
         }
     }
+
+    void config_device(){
+
+    }
     
     ros::NodeHandle nh;
+    ros::Publisher pub_navsat;
+    ros::Publisher pub_pose;
     ba::io_service io;
     ba::serial_port port;
     std::string dev;
