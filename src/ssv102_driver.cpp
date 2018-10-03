@@ -1,6 +1,7 @@
 #include <ros/ros.h>
 #include <ros/console.h>
 #include <sensor_msgs/NavSatFix.h>
+#include <sensor_msgs/TimeReference.h>
 #include <geometry_msgs/PoseStamped.h>
 
 #include <iostream>
@@ -34,6 +35,7 @@ public:
         nh.param<std::string>("framed_id", frame_id, "ssV102");
 
         pub_navsat = nh.advertise<sensor_msgs::NavSatFix>("gps", 20);
+        pub_time = nh.advertise<sensor_msgs::TimeReference>("gps_time", 20);
         pub_pose = nh.advertise<geometry_msgs::PoseStamped>("pose", 20);
 
         navsat_msg.header.frame_id = frame_id;
@@ -113,7 +115,7 @@ private:
                     if(message == "GGA"){
                         //std::cout << "GGA Sentense : " << words << std::endl;
 
-                        double time;
+                        double utc;
                         double lat;
                         double lon;
                         double alt;
@@ -126,7 +128,7 @@ private:
                           words.cbegin(),
                           words.cend(),
                           (
-                              *qi::double_[bp::ref(time) = qi::_1] >> ',' >>
+                              *qi::double_[bp::ref(utc) = qi::_1] >> ',' >>
                               *qi::double_[([&lat](double dm){lat = Ssv102::dm2dd(dm);})] >> ',' >>
                               *(qi::lit('N') | qi::lit('S')[([&lat](){lat = -lat;})]) >> ',' >>
                               *qi::double_[([&lon](double dm){lon = Ssv102::dm2dd(dm);})] >> ',' >>
@@ -147,8 +149,9 @@ private:
                                 std::cout << "Latitude : " << lat << std::endl;
                                 std::cout << "Longitude : " << lon << std::endl;
                                 std::cout << "Altitude : " << alt - alt_geo << std::endl;
-                                std::cout << "HDOP : " << hdop << std::endl;           
-                                */                     
+                                std::cout << "HDOP : " << hdop << std::endl;
+                                std::cout << "UTC : " << utc << std::endl;
+                                */
 
                                 navsat_msg.header.stamp = now;
                                 navsat_msg.latitude = lat;
@@ -167,11 +170,44 @@ private:
                                 }
 
                                 pub_navsat.publish(navsat_msg);
+
+                                sensor_msgs::TimeReference time;
+                                time.header = navsat_msg.header;
+                                time.time_ref = ros::Time(utc);
+                                time.source = "GNSS";
+                                pub_time.publish(time);
+
+                                navsat_msg.header.seq++;
                             }
                         }
                     }else if(message == "GST"){
                         std::cout << "GST Sentense : " << words << std::endl;
 
+                        double co_lon = -1.0;
+                        double co_lat = -1.0;
+                        double co_alt = -1.0;
+
+                        if(qi::parse(
+                          words.cbegin(),
+                          words.cend(),
+                          (
+                              *qi::double_ >> ',' >>    // UTC
+                              *qi::double_ >> ',' >>    // Total covariance
+                              *qi::double_ >> ',' >>    // Covariance in long axis
+                              *qi::double_ >> ',' >>    // Covariance in short axis
+                              *qi::double_ >> ',' >>    // Heading angle of long axis
+                              *qi::double_[bp::ref(co_lat) = qi::_1] >> ',' >>
+                              *qi::double_[bp::ref(co_lon) = qi::_1] >> ',' >>
+                              *qi::double_[bp::ref(co_alt) = qi::_1]
+                          )  
+                        )){
+                            if(co_lon > 0.0 && co_lat > 0.0 && co_alt > 0.0){
+                                navsat_msg.position_covariance = {  co_lon * co_lon, 0.0, 0.0,
+                                                                    0.0, co_lat * co_lat, 0.0,
+                                                                    0.0, 0.0, co_alt * co_alt };
+                                navsat_msg.position_covariance_type = sensor_msgs::NavSatFix::COVARIANCE_TYPE_DIAGONAL_KNOWN;
+                            }
+                        }
                     }
                 }else{
                     ROS_INFO("GPS Checksum failed");
@@ -200,6 +236,7 @@ private:
     
     ros::NodeHandle nh;
     ros::Publisher pub_navsat;
+    ros::Publisher pub_time;
     ros::Publisher pub_pose;
     ba::io_service io;
     ba::serial_port port;
