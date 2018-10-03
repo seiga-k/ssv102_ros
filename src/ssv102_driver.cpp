@@ -5,6 +5,7 @@
 
 #include <iostream>
 #include <thread>
+#include <cmath>
 
 #include <boost/asio.hpp>
 #include <boost/asio/buffer.hpp>
@@ -13,6 +14,7 @@
 #include <boost/xpressive/xpressive.hpp>
 #include <boost/phoenix.hpp>
 #include <boost/spirit/include/qi.hpp>
+#include <boost/lambda/lambda.hpp>
 
 namespace ba = boost::asio;
 namespace qi = boost::spirit::qi;
@@ -31,16 +33,30 @@ public:
         nh.param("baud", baud, 19200);
         nh.param<std::string>("framed_id", frame_id, "ssV102");
 
-        port.open(dev);
-        port.set_option(ba::serial_port_base::baud_rate(static_cast<unsigned int>(baud)));
-        port.set_option(ba::serial_port_base::flow_control(ba::serial_port_base::flow_control::none));
-        port.set_option(ba::serial_port_base::parity(ba::serial_port_base::parity::none));
-        port.set_option(ba::serial_port_base::stop_bits(ba::serial_port_base::stop_bits::one));
-        port.set_option(ba::serial_port_base::character_size(8));
-        ba::async_read_until(port, buffer, delim, boost::bind(&Ssv102::rx_callback, this, ba::placeholders::error, ba::placeholders::bytes_transferred));
-
         pub_navsat = nh.advertise<sensor_msgs::NavSatFix>("gps", 20);
         pub_pose = nh.advertise<geometry_msgs::PoseStamped>("pose", 20);
+
+        navsat_msg.header.frame_id = frame_id;
+        navsat_msg.header.seq = 0;
+        navsat_msg.position_covariance_type = sensor_msgs::NavSatFix::COVARIANCE_TYPE_UNKNOWN;
+    }
+
+    bool init()
+    {
+        try{
+            port.open(dev);
+            port.set_option(ba::serial_port_base::baud_rate(static_cast<unsigned int>(baud)));
+            port.set_option(ba::serial_port_base::flow_control(ba::serial_port_base::flow_control::none));
+            port.set_option(ba::serial_port_base::parity(ba::serial_port_base::parity::none));
+            port.set_option(ba::serial_port_base::stop_bits(ba::serial_port_base::stop_bits::one));
+            port.set_option(ba::serial_port_base::character_size(8));
+            ba::async_read_until(port, buffer, delim, boost::bind(&Ssv102::rx_callback, this, ba::placeholders::error, ba::placeholders::bytes_transferred));
+        }
+        catch(boost::system::system_error e){
+            ROS_ERROR("Faild to open a device. %s", e.what());
+            return false;
+        }
+        return true;
     }
 
     ~Ssv102()
@@ -95,11 +111,7 @@ private:
 
                 if(checksum == checksum_calced){
                     if(message == "GGA"){
-                        std::cout << "GGA Sentense : " << words << std::endl;
-                        sensor_msgs::NavSatFix msg;
-                        msg.header.frame_id = frame_id;
-                        msg.header.seq = navsat_seq++;
-                        msg.header.stamp = now;
+                        //std::cout << "GGA Sentense : " << words << std::endl;
 
                         double time;
                         double lat;
@@ -115,10 +127,10 @@ private:
                           words.cend(),
                           (
                               *qi::double_[bp::ref(time) = qi::_1] >> ',' >>
-                              *qi::double_[bp::ref(lat) = qi::_1] >> ',' >>
-                              *(qi::lit('N') | qi::lit('S')) >> ',' >>
-                              *qi::double_[bp::ref(lon) = qi::_1] >> ',' >>
-                              *(qi::lit('E') | qi::lit('W')) >> ',' >>
+                              *qi::double_[([&lat](double dm){lat = Ssv102::dm2dd(dm);})] >> ',' >>
+                              *(qi::lit('N') | qi::lit('S')[([&lat](){lat = -lat;})]) >> ',' >>
+                              *qi::double_[([&lon](double dm){lon = Ssv102::dm2dd(dm);})] >> ',' >>
+                              *(qi::lit('E') | qi::lit('W')[([&lon](){lon = -lon;})]) >> ',' >>
                               *qi::int_[bp::ref(mode) = qi::_1] >> ',' >>
                               *qi::int_[bp::ref(sat_num) = qi::_1] >> ',' >>
                               *qi::double_[bp::ref(hdop) = qi::_1] >> ',' >>
@@ -130,11 +142,36 @@ private:
                               *qi::int_
                           )  
                         )){
-                            std::cout << "Latitude : " << lat << std::endl;
-                            std::cout << "Longitude : " << lon << std::endl;
-                            std::cout << "Altitude : " << alt << std::endl;
-                            std::cout << "HDOP : " << hdop << std::endl;
+                            if(mode > 0){
+                                /*
+                                std::cout << "Latitude : " << lat << std::endl;
+                                std::cout << "Longitude : " << lon << std::endl;
+                                std::cout << "Altitude : " << alt - alt_geo << std::endl;
+                                std::cout << "HDOP : " << hdop << std::endl;           
+                                */                     
+
+                                navsat_msg.header.stamp = now;
+                                navsat_msg.latitude = lat;
+                                navsat_msg.longitude = lon;
+                                navsat_msg.altitude = alt - alt_geo;
+                                navsat_msg.status.service = sensor_msgs::NavSatStatus::SERVICE_GPS;
+                                navsat_msg.status.status = mode - 1;
+
+                                if(navsat_msg.position_covariance_type == sensor_msgs::NavSatFix::COVARIANCE_TYPE_UNKNOWN || 
+                                navsat_msg.position_covariance_type == sensor_msgs::NavSatFix::COVARIANCE_TYPE_APPROXIMATED){
+                                    double co = std::pow(2.5 * hdop, 2.0);
+                                    navsat_msg.position_covariance = {  co, 0.0, 0.0,
+                                                                        0.0, co, 0.0,
+                                                                        0.0, 0.0, co };
+                                    navsat_msg.position_covariance_type = sensor_msgs::NavSatFix::COVARIANCE_TYPE_APPROXIMATED;
+                                }
+
+                                pub_navsat.publish(navsat_msg);
+                            }
                         }
+                    }else if(message == "GST"){
+                        std::cout << "GST Sentense : " << words << std::endl;
+
                     }
                 }else{
                     ROS_INFO("GPS Checksum failed");
@@ -152,6 +189,14 @@ private:
     void config_device(){
 
     }
+
+    static double dm2dd(const double dm)
+    {
+        double dd = 0.0;
+        dd = static_cast<int>(dm / 100.0);
+        dd += (dm - dd * 100.0) / 60.0;
+        return dd;
+    };
     
     ros::NodeHandle nh;
     ros::Publisher pub_navsat;
@@ -163,7 +208,7 @@ private:
     int baud;
     ba::streambuf buffer;
     std::thread io_thread;
-    int navsat_seq;
+    sensor_msgs::NavSatFix navsat_msg;
     int pose_seq;
     std::string frame_id;
 };
@@ -174,12 +219,15 @@ int main(int argc, char** argv)
     ROS_INFO("Start ssV102 driver node");
     ba::io_service io_service;
 	Ssv102 gps(io_service);
-    std::thread t( [&io_service](){ io_service.run(); });
 
-	ros::spin();
+    if(gps.init()){
+        std::thread t( [&io_service](){ io_service.run(); });
 
-    gps.close();
-    t.join();
+        ros::spin();
+
+        gps.close();
+        t.join();
+    }
 
 	return 0;
 }
