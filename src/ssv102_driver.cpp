@@ -7,6 +7,8 @@
 #include <iostream>
 #include <thread>
 #include <cmath>
+#include <sys/ioctl.h>
+#include <errno.h>  
 
 #include <boost/asio.hpp>
 #include <boost/asio/buffer.hpp>
@@ -26,12 +28,11 @@ class Ssv102{
 public:
     Ssv102(ba::io_service &io):
         nh("~"),
-        io(),
         port(io),
-        delim("\r")
+        delim("\r\n")
     {
         nh.param<std::string>("device", dev, "/dev/ttyUSB0");
-        nh.param("baud", baud, 19200);
+        nh.param("baud", baud, 115200);
         nh.param<std::string>("framed_id", frame_id, "ssV102");
 
         pub_navsat = nh.advertise<sensor_msgs::NavSatFix>("gps", 20);
@@ -53,6 +54,22 @@ public:
             port.set_option(ba::serial_port_base::stop_bits(ba::serial_port_base::stop_bits::one));
             port.set_option(ba::serial_port_base::character_size(8));
             ba::async_read_until(port, buffer, delim, boost::bind(&Ssv102::rx_callback, this, ba::placeholders::error, ba::placeholders::bytes_transferred));
+
+            int arg = TIOCM_DTR;
+            if(ioctl(port.native_handle(), TIOCMBIS, &arg) < 0){
+                int err = errno;
+                std::cout << "IOCTL Error : " << err << std::endl;
+
+            }
+            arg = TIOCM_RTS;
+            if(ioctl(port.native_handle(), TIOCMBIS, &arg) < 0){
+                int err = errno;
+                std::cout << "IOCTL Error : " << err << std::endl;
+            }
+
+            config_device();
+            ROS_INFO("ssV102 configure completed. Start to receiving.");
+
         }
         catch(boost::system::system_error e){
             ROS_ERROR("Faild to open a device. %s", e.what());
@@ -64,6 +81,7 @@ public:
     ~Ssv102()
     {
         if(port.is_open()){
+            port.cancel();
             port.close();
         }
     }
@@ -71,6 +89,7 @@ public:
     void close()
     {
         if(port.is_open()){
+            port.cancel();
             port.close();
         }
     }
@@ -113,7 +132,7 @@ private:
 
                 if(checksum == checksum_calced){
                     if(message == "GGA"){
-                        //std::cout << "GGA Sentense : " << words << std::endl;
+                        std::cout << "GGA Sentense : " << words << std::endl;
 
                         double utc;
                         double lat;
@@ -207,6 +226,33 @@ private:
                                                                     0.0, 0.0, co_alt * co_alt };
                                 navsat_msg.position_covariance_type = sensor_msgs::NavSatFix::COVARIANCE_TYPE_DIAGONAL_KNOWN;
                             }
+                        }   
+                    }else if(talker == "PS" && message == "AT"){
+                        if(words.find("HPR") != std::string::npos){
+                            std::cout << "HPR Sentense : " << words << std::endl;
+                            double heading = 1000;
+                            double pitch;
+                            double roll;
+                            std::string mode;
+                            if(qi::parse(
+                                words.cbegin(),
+                                words.cend(),
+                                (
+                                    qi::lit("HPR") >> ',' >>
+                                    *qi::double_ >> ',' >>
+                                    *qi::double_[bp::ref(heading) = qi::_1] >> ',' >>
+                                    *qi::double_[bp::ref(pitch) = qi::_1] >> ',' >>
+                                    *qi::double_[bp::ref(roll) = qi::_1] >> ',' >>
+                                    *qi::alnum[bp::ref(mode) = qi::_1]
+                                )
+                            )){
+                                if(heading != 1000){
+                                    std::cout << "HPR" << std::endl;
+                                    std::cout << "Heading : " << heading << std::endl;
+                                    std::cout << "Pitch   : " << pitch << std::endl;
+                                    std::cout << "Roll    : " << roll << std::endl; 
+                                }
+                            }
                         }
                     }
                 }else{
@@ -223,7 +269,15 @@ private:
     }
 
     void config_device(){
-
+        std::vector<std::string> init_commands = {
+            "$JASC,GPHPR,10",
+            "$JASC,GPGST,10",
+            "$JASC,GPGGA,10"
+        };
+        for(auto&& cmd : init_commands){
+            cmd += "\r\n";
+            port.write_some(boost::asio::buffer(cmd, cmd.length()));
+        }
     }
 
     static double dm2dd(const double dm)
@@ -238,7 +292,6 @@ private:
     ros::Publisher pub_navsat;
     ros::Publisher pub_time;
     ros::Publisher pub_pose;
-    ba::io_service io;
     ba::serial_port port;
     std::string dev;
     std::string delim;
