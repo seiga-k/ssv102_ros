@@ -29,6 +29,8 @@ public:
     {
         nh.param<std::string>("device", dev, "/dev/ttyUSB0");
         nh.param("baud", baud, 19200);
+        nh.param<std::string>("framed_id", frame_id, "ssV102");
+
         port.open(dev);
         port.set_option(ba::serial_port_base::baud_rate(static_cast<unsigned int>(baud)));
         port.set_option(ba::serial_port_base::flow_control(ba::serial_port_base::flow_control::none));
@@ -59,10 +61,11 @@ private:
     void rx_callback(const boost::system::error_code& e, std::size_t size){
         //std::cout << "call backed!!!" << std::endl;
         if(!e){
+            ros::Time now = ros::Time::now();
             std::istream ins(&buffer);
             std::string line;
             std::getline(ins, line);
-            std::cout << line << std::endl;
+            //std::cout << line << std::endl;
 
             std::string talker;
             std::string message;
@@ -81,15 +84,68 @@ private:
                 qi::hex[bp::ref(checksum) = qi::_1]
                 )
                 )) {
-                std::cout << "Talker   : " << talker << std::endl;
-                std::cout << "Message  : " << message << std::endl;
-                std::cout << "Words    : " << words << std::endl;
-                std::cout << "Checksum : " << checksum << std::endl;
+                //std::cout << "Talker   : " << talker << std::endl;
+                //std::cout << "Message  : " << message << std::endl;
+                //std::cout << "Words    : " << words << std::endl;
+                //std::cout << "Checksum : " << checksum << std::endl;
+                int checksum_calced = 0;
+                for(auto it = line.cbegin() + 1; it != line.cend() - 4; ++it){
+                    checksum_calced ^= static_cast<uint8_t>(*it);
+                }
+
+                if(checksum == checksum_calced){
+                    if(message == "GGA"){
+                        std::cout << "GGA Sentense : " << words << std::endl;
+                        sensor_msgs::NavSatFix msg;
+                        msg.header.frame_id = frame_id;
+                        msg.header.seq = navsat_seq++;
+                        msg.header.stamp = now;
+
+                        double time;
+                        double lat;
+                        double lon;
+                        double alt;
+                        double alt_geo;
+                        int mode;
+                        int sat_num;
+                        double hdop;
+                        
+                        if(qi::parse(
+                          words.cbegin(),
+                          words.cend(),
+                          (
+                              *qi::double_[bp::ref(time) = qi::_1] >> ',' >>
+                              *qi::double_[bp::ref(lat) = qi::_1] >> ',' >>
+                              *(qi::lit('N') | qi::lit('S')) >> ',' >>
+                              *qi::double_[bp::ref(lon) = qi::_1] >> ',' >>
+                              *(qi::lit('E') | qi::lit('W')) >> ',' >>
+                              *qi::int_[bp::ref(mode) = qi::_1] >> ',' >>
+                              *qi::int_[bp::ref(sat_num) = qi::_1] >> ',' >>
+                              *qi::double_[bp::ref(hdop) = qi::_1] >> ',' >>
+                              *qi::double_[bp::ref(alt) = qi::_1] >> ',' >>
+                              *qi::lit('M') >> ',' >>
+                              *qi::double_[bp::ref(alt_geo) = qi::_1] >> ',' >>
+                              *qi::lit('M') >> ',' >>
+                              *qi::double_ >> ',' >>
+                              *qi::int_
+                          )  
+                        )){
+                            std::cout << "Latitude : " << lat << std::endl;
+                            std::cout << "Longitude : " << lon << std::endl;
+                            std::cout << "Altitude : " << alt << std::endl;
+                            std::cout << "HDOP : " << hdop << std::endl;
+                        }
+                    }
+                }else{
+                    ROS_INFO("GPS Checksum failed");
+                }           
             }else{
-                std::cout << "Parse failed : " << line << std::endl;
+                //std::cout << "Parse failed : " << line << std::endl;
             }
 
             ba::async_read_until(port, buffer, delim, boost::bind(&Ssv102::rx_callback, this, ba::placeholders::error, ba::placeholders::bytes_transferred));
+        }else{
+            ROS_ERROR("GPS Serialport receive error. Stop receiving.");
         }
     }
 
@@ -107,6 +163,9 @@ private:
     int baud;
     ba::streambuf buffer;
     std::thread io_thread;
+    int navsat_seq;
+    int pose_seq;
+    std::string frame_id;
 };
 
 int main(int argc, char** argv)
