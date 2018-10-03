@@ -15,6 +15,8 @@
 #include <boost/spirit/include/qi.hpp>
 
 namespace ba = boost::asio;
+namespace qi = boost::spirit::qi;
+namespace bp = boost::phoenix;
 
 class Ssv102{
 
@@ -33,8 +35,6 @@ public:
         port.set_option(ba::serial_port_base::parity(ba::serial_port_base::parity::none));
         port.set_option(ba::serial_port_base::stop_bits(ba::serial_port_base::stop_bits::one));
         port.set_option(ba::serial_port_base::character_size(8));
-        std::string str = "Hello World\r\n";
-        port.write_some(ba::buffer(str, str.length()));
         ba::async_read_until(port, buffer, delim, boost::bind(&Ssv102::rx_callback, this, ba::placeholders::error, ba::placeholders::bytes_transferred));
 
         pub_navsat = nh.advertise<sensor_msgs::NavSatFix>("gps", 20);
@@ -64,11 +64,30 @@ private:
             std::getline(ins, line);
             std::cout << line << std::endl;
 
-            sensor_msgs::NavSatFix navsat;
-            geometry_msgs::PoseStamped pose;
-
-            pub_navsat.publish(navsat);
-            pub_pose.publish(pose);
+            std::string talker;
+            std::string message;
+            std::string words;
+            int checksum;
+            if (qi::parse(
+                line.cbegin(),
+                line.cend(),
+                (
+                qi::lit("$") >>
+                qi::as_string[qi::char_ >> qi::char_][bp::ref(talker) = qi::_1] >>
+                qi::as_string[+qi::alnum][bp::ref(message) = qi::_1] >>
+                qi::lit(",") >>
+                qi::as_string[*(qi::char_ - '*')][bp::ref(words) = qi::_1] >>
+                qi::lit("*") >>
+                qi::hex[bp::ref(checksum) = qi::_1]
+                )
+                )) {
+                std::cout << "Talker   : " << talker << std::endl;
+                std::cout << "Message  : " << message << std::endl;
+                std::cout << "Words    : " << words << std::endl;
+                std::cout << "Checksum : " << checksum << std::endl;
+            }else{
+                std::cout << "Parse failed : " << line << std::endl;
+            }
 
             ba::async_read_until(port, buffer, delim, boost::bind(&Ssv102::rx_callback, this, ba::placeholders::error, ba::placeholders::bytes_transferred));
         }
@@ -96,7 +115,7 @@ int main(int argc, char** argv)
     ROS_INFO("Start ssV102 driver node");
     ba::io_service io_service;
 	Ssv102 gps(io_service);
-    std::thread t([&io_service](){ io_service.run(); });
+    std::thread t( [&io_service](){ io_service.run(); });
 
 	ros::spin();
 
