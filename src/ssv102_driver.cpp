@@ -26,13 +26,14 @@ namespace bp = boost::phoenix;
 class Ssv102{
 
 public:
-    Ssv102(ba::io_service &io):
+    Ssv102(ba::io_service &io) :
         nh("~"),
+        io_service(io),
         port(io),
         delim("\r\n")
     {
         nh.param<std::string>("device", dev, "/dev/ttyUSB0");
-        nh.param("baud", baud, 115200);
+        nh.param<int>("baud", baud, 115200);
         nh.param<std::string>("framed_id", frame_id, "ssV102");
 
         pub_navsat = nh.advertise<sensor_msgs::NavSatFix>("gps", 20);
@@ -43,17 +44,19 @@ public:
         navsat_msg.header.seq = 0;
         navsat_msg.position_covariance_type = sensor_msgs::NavSatFix::COVARIANCE_TYPE_UNKNOWN;
     }
-
+    
     bool init()
     {
         try{
             port.open(dev);
-            port.set_option(ba::serial_port_base::baud_rate(static_cast<unsigned int>(baud)));
+            port.set_option(ba::serial_port_base::baud_rate(baud));
             port.set_option(ba::serial_port_base::flow_control(ba::serial_port_base::flow_control::none));
             port.set_option(ba::serial_port_base::parity(ba::serial_port_base::parity::none));
             port.set_option(ba::serial_port_base::stop_bits(ba::serial_port_base::stop_bits::one));
             port.set_option(ba::serial_port_base::character_size(8));
+
             ba::async_read_until(port, buffer, delim, boost::bind(&Ssv102::rx_callback, this, ba::placeholders::error, ba::placeholders::bytes_transferred));
+            t = std::thread( [this](){ io_service.run(); });
 
             int arg = TIOCM_DTR;
             if(ioctl(port.native_handle(), TIOCMBIS, &arg) < 0){
@@ -68,6 +71,8 @@ public:
             }
 
             config_device();
+
+
             ROS_INFO("ssV102 configure completed. Start to receiving.");
 
         }
@@ -91,6 +96,7 @@ public:
         if(port.is_open()){
             port.cancel();
             port.close();
+            t.join();
         }
     }
 
@@ -272,7 +278,12 @@ private:
         std::vector<std::string> init_commands = {
             "$JASC,GPHPR,10",
             "$JASC,GPGST,10",
-            "$JASC,GPGGA,10"
+            "$JASC,GPGGA,10",
+            "$JATT,COGTAU,0.0",
+            "$JATT,HRTAU,0.0",
+            "$JATT,HTAU,0.0",
+            "$JATT,PTAU,0.0",
+            "$JATT,SPDTAU,0.0"
         };
         for(auto&& cmd : init_commands){
             cmd += "\r\n";
@@ -293,6 +304,8 @@ private:
     ros::Publisher pub_time;
     ros::Publisher pub_pose;
     ba::serial_port port;
+    ba::io_service& io_service;
+    std::thread t;
     std::string dev;
     std::string delim;
     int baud;
@@ -307,17 +320,16 @@ int main(int argc, char** argv)
 {
 	ros::init(argc, argv, "ssv102_ros");
     ROS_INFO("Start ssV102 driver node");
-    ba::io_service io_service;
-	Ssv102 gps(io_service);
-
-    if(gps.init()){
-        std::thread t( [&io_service](){ io_service.run(); });
-
-        ros::spin();
-
-        gps.close();
-        t.join();
+    
+    ba::io_service io;
+	Ssv102 gps(io);
+    
+    if(!gps.init()){
+        return -1;
     }
+
+    ros::spin();
+    gps.close();
 
 	return 0;
 }
