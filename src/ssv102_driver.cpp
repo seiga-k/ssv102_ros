@@ -37,8 +37,8 @@ public:
         nh.param<int>("baud", baud, 115200);
         nh.param<std::string>("framed_id", frame_id, "ssV102");
 
-        pub_navsat = nh.advertise<sensor_msgs::NavSatFix>("gps", 20);
-        pub_time = nh.advertise<sensor_msgs::TimeReference>("gps_time", 20);
+        pub_navsat = nh.advertise<sensor_msgs::NavSatFix>("fix", 20);
+        pub_time = nh.advertise<sensor_msgs::TimeReference>("time", 20);
         pub_pose = nh.advertise<geometry_msgs::PoseStamped>("pose", 20);
 
         navsat_msg.header.frame_id = frame_id;
@@ -63,7 +63,7 @@ public:
 
             ba::async_read_until(port, buffer, delim, boost::bind(&Ssv102::rx_callback, this, ba::placeholders::error, ba::placeholders::bytes_transferred));
             t = std::thread( [this](){ io_service.run(); });
-            
+
             config_device();
             ROS_INFO("ssV102 configure completed. Start to receiving.");
 
