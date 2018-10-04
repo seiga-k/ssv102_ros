@@ -3,6 +3,7 @@
 #include <sensor_msgs/NavSatFix.h>
 #include <sensor_msgs/TimeReference.h>
 #include <geometry_msgs/PoseStamped.h>
+#include <tf/tf.h>
 
 #include <iostream>
 #include <thread>
@@ -43,6 +44,11 @@ public:
         navsat_msg.header.frame_id = frame_id;
         navsat_msg.header.seq = 0;
         navsat_msg.position_covariance_type = sensor_msgs::NavSatFix::COVARIANCE_TYPE_UNKNOWN;
+        pose.header.frame_id = frame_id;
+        pose.header.seq = 0;
+        pose.pose.position.x = 0.0;
+        pose.pose.position.y = 0.0;
+        pose.pose.position.z = 0.0;
     }
     
     bool init()
@@ -57,22 +63,8 @@ public:
 
             ba::async_read_until(port, buffer, delim, boost::bind(&Ssv102::rx_callback, this, ba::placeholders::error, ba::placeholders::bytes_transferred));
             t = std::thread( [this](){ io_service.run(); });
-
-            int arg = TIOCM_DTR;
-            if(ioctl(port.native_handle(), TIOCMBIS, &arg) < 0){
-                int err = errno;
-                std::cout << "IOCTL Error : " << err << std::endl;
-
-            }
-            arg = TIOCM_RTS;
-            if(ioctl(port.native_handle(), TIOCMBIS, &arg) < 0){
-                int err = errno;
-                std::cout << "IOCTL Error : " << err << std::endl;
-            }
-
+            
             config_device();
-
-
             ROS_INFO("ssV102 configure completed. Start to receiving.");
 
         }
@@ -138,7 +130,7 @@ private:
 
                 if(checksum == checksum_calced){
                     if(message == "GGA"){
-                        std::cout << "GGA Sentense : " << words << std::endl;
+                        //std::cout << "GGA Sentense : " << words << std::endl;
 
                         double utc;
                         double lat;
@@ -206,7 +198,7 @@ private:
                             }
                         }
                     }else if(message == "GST"){
-                        std::cout << "GST Sentense : " << words << std::endl;
+                        //std::cout << "GST Sentense : " << words << std::endl;
 
                         double co_lon = -1.0;
                         double co_lat = -1.0;
@@ -235,7 +227,7 @@ private:
                         }   
                     }else if(talker == "PS" && message == "AT"){
                         if(words.find("HPR") != std::string::npos){
-                            std::cout << "HPR Sentense : " << words << std::endl;
+                            //std::cout << "HPR Sentense : " << words << std::endl;
                             double heading = 1000;
                             double pitch;
                             double roll;
@@ -244,19 +236,26 @@ private:
                                 words.cbegin(),
                                 words.cend(),
                                 (
-                                    qi::lit("HPR") >> ',' >>
-                                    *qi::double_ >> ',' >>
-                                    *qi::double_[bp::ref(heading) = qi::_1] >> ',' >>
-                                    *qi::double_[bp::ref(pitch) = qi::_1] >> ',' >>
+                                    qi::lit("HPR") >> ',' >>    // Header string
+                                    *qi::double_ >> ',' >>      // UTC
+                                    *qi::double_[bp::ref(heading) = -qi::_1] >> ',' >>
+                                    *qi::double_[bp::ref(pitch) = -qi::_1] >> ',' >>
                                     *qi::double_[bp::ref(roll) = qi::_1] >> ',' >>
                                     *qi::alnum[bp::ref(mode) = qi::_1]
                                 )
                             )){
                                 if(heading != 1000){
+                                    /*
                                     std::cout << "HPR" << std::endl;
                                     std::cout << "Heading : " << heading << std::endl;
                                     std::cout << "Pitch   : " << pitch << std::endl;
                                     std::cout << "Roll    : " << roll << std::endl; 
+                                    */
+                                    pose.header.stamp = now;
+                                    pose.pose.orientation = tf::createQuaternionMsgFromRollPitchYaw(
+                                        roll * M_PI / 180.0, pitch * M_PI / 180.0, heading * M_PI / 180.0);
+                                    pub_pose.publish(pose);
+                                    pose.header.seq++;
                                 }
                             }
                         }
@@ -311,8 +310,8 @@ private:
     int baud;
     ba::streambuf buffer;
     std::thread io_thread;
-    sensor_msgs::NavSatFix navsat_msg;
-    int pose_seq;
+    sensor_msgs::NavSatFix navsat_msg;  
+    geometry_msgs::PoseStamped pose;
     std::string frame_id;
 };
 
