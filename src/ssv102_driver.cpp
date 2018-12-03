@@ -10,6 +10,7 @@
 #include <cmath>
 #include <sys/ioctl.h>
 #include <errno.h>  
+#include <ctime>
 
 #include <boost/asio.hpp>
 #include <boost/asio/buffer.hpp>
@@ -19,6 +20,7 @@
 #include <boost/phoenix.hpp>
 #include <boost/spirit/include/qi.hpp>
 #include <boost/lambda/lambda.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
 
 namespace ba = boost::asio;
 namespace qi = boost::spirit::qi;
@@ -49,6 +51,9 @@ public:
         pose.pose.position.x = 0.0;
         pose.pose.position.y = 0.0;
         pose.pose.position.z = 0.0;
+
+        time_msg.header = navsat_msg.header;
+        time_msg.source = "GNSS";
     }
     
     bool init()
@@ -187,13 +192,6 @@ private:
                                 }
 
                                 pub_navsat.publish(navsat_msg);
-
-                                sensor_msgs::TimeReference time;
-                                time.header = navsat_msg.header;
-                                time.time_ref = ros::Time(utc);
-                                time.source = "GNSS";
-                                pub_time.publish(time);
-
                                 navsat_msg.header.seq++;
                             }
                         }
@@ -259,6 +257,36 @@ private:
                                 }
                             }
                         }
+                    }else if(message == "ZDA"){
+                        double hhmmss;
+                        int dd, MM, yyyy, xx, yy;
+                        if(qi::parse(
+                            words.cbegin(),
+                            words.cend(),
+                            (
+                                *qi::double_[bp::ref(hhmmss) = qi::_1] >> ',' >>    // hours minutes seconds . miliseconds
+                                *qi::int_[bp::ref(dd) = qi::_1] >> ',' >>           // day
+                                *qi::int_[bp::ref(MM) = qi::_1] >> ',' >>           // month
+                                *qi::int_[bp::ref(yyyy) = qi::_1] >> ',' >>         // year
+                                *qi::int_[bp::ref(xx) = qi::_1] >> ',' >>           // local zone hours
+                                *qi::int_[bp::ref(yy) = qi::_1]                     // local zone minutes
+                            )  
+                        )){
+                            int hh, mm, ss, ns;
+                            hh = hhmmss / 10000.0;
+                            mm = hhmmss / 100.0 - hh * 100;
+                            ss = hhmmss - hh * 10000 - mm * 100;
+                            ns = (hhmmss - hh * 10000.0 - mm * 100.0 - ss) * 10000000.0;
+                            std::cout << "ZDA" << std::endl;
+                            std::cout << "Input  : " << hhmmss << std::endl;
+                            std::cout << "Output : " << hh << mm << ss << "." << ns << std::endl;
+                            boost::gregorian::date date(yyyy, MM, dd);
+                            boost::posix_time::ptime boost_time(boost::gregorian::date(yyyy, MM, dd), boost::posix_time::time_duration(hh, mm, ss, ns));
+                            time_msg.header.stamp = ros::Time::now();
+                            time_msg.time_ref = ros::Time::fromBoost(boost_time);
+                            pub_time.publish(time_msg);
+                            time_msg.header.seq++;
+                        } 
                     }
                 }else{
                     ROS_INFO("GPS Checksum failed");
@@ -278,6 +306,7 @@ private:
             "$JASC,GPHPR,10",
             "$JASC,GPGST,10",
             "$JASC,GPGGA,10",
+            "$JASC,GPZDA,1",
             "$JATT,COGTAU,0.0",
             "$JATT,HRTAU,0.0",
             "$JATT,HTAU,0.0",
@@ -312,6 +341,7 @@ private:
     std::thread io_thread;
     sensor_msgs::NavSatFix navsat_msg;  
     geometry_msgs::PoseStamped pose;
+    sensor_msgs::TimeReference time_msg;
     std::string frame_id;
 };
 
