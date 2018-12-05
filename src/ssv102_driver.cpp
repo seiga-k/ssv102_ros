@@ -282,12 +282,17 @@ private:
                             std::cout << "Input  : " << hhmmss << std::endl;
                             std::cout << "Output : " << hh << mm << ss << "." << ns << std::endl;
                             */
-                            boost::gregorian::date date(yyyy, MM, dd);
-                            boost::posix_time::ptime boost_time(boost::gregorian::date(yyyy, MM, dd), boost::posix_time::time_duration(hh, mm, ss, ns));
-                            time_msg.header.stamp = ros::Time::now();
-                            time_msg.time_ref = ros::Time::fromBoost(boost_time);
-                            pub_time.publish(time_msg);
-                            time_msg.header.seq++;
+                            try{
+                                boost::gregorian::date date(yyyy, MM, dd);
+                                boost::posix_time::ptime boost_time(boost::gregorian::date(yyyy, MM, dd), boost::posix_time::time_duration(hh, mm, ss, ns));
+                                time_msg.header.stamp = ros::Time::now();
+                                time_msg.time_ref = ros::Time::fromBoost(boost_time);
+                                pub_time.publish(time_msg);
+                                time_msg.header.seq++;
+                            }
+                            catch(std::out_of_range ex){
+                                ROS_WARN("GPZDA sentense parse failed.");
+                            }
                         } 
                     }
                 }else{
