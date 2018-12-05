@@ -277,9 +277,11 @@ private:
                             mm = hhmmss / 100.0 - hh * 100;
                             ss = hhmmss - hh * 10000 - mm * 100;
                             ns = (hhmmss - hh * 10000.0 - mm * 100.0 - ss) * 10000000.0;
+                            /*
                             std::cout << "ZDA" << std::endl;
                             std::cout << "Input  : " << hhmmss << std::endl;
                             std::cout << "Output : " << hh << mm << ss << "." << ns << std::endl;
+                            */
                             boost::gregorian::date date(yyyy, MM, dd);
                             boost::posix_time::ptime boost_time(boost::gregorian::date(yyyy, MM, dd), boost::posix_time::time_duration(hh, mm, ss, ns));
                             time_msg.header.stamp = ros::Time::now();
