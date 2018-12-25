@@ -316,6 +316,7 @@ private:
             "$JASC,GPGST,10",
             "$JASC,GPGGA,10",
             "$JASC,GPZDA,1",
+            "$JNMEA,GGAALLGNSS,YES",
             "$JATT,COGTAU,0.0",
             "$JATT,HRTAU,0.0",
             "$JATT,HTAU,0.0",
