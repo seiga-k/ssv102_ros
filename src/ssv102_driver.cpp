@@ -251,7 +251,9 @@ private:
                                     */
                                     pose.header.stamp = now;
                                     pose.pose.orientation = tf::createQuaternionMsgFromRollPitchYaw(
-                                        roll * M_PI / 180.0, pitch * M_PI / 180.0, heading * M_PI / 180.0);
+                                        roll * M_PI / 180.0, pitch * M_PI / 180.0, (heading + 90.0) * M_PI / 180.0);
+                                    // SSV102の出力するheadingは真北が0度でCW方向が正の座標系で出力されている．
+                                    // これをROSで一般的な東がX，北がYの座標系に沿うように，東が0度，CCW方向が正となるように変換して出力する．
                                     pub_pose.publish(pose);
                                     pose.header.seq++;
                                 }
