@@ -419,9 +419,9 @@ private:
             "$JASC,GPZDA,1",
             "$JNMEA,GGAALLGNSS,YES",
             "$JATT,COGTAU,0.1",
-            "$JATT,HRTAU,0.0",
+            "$JATT,HRTAU,0.1",
             "$JATT,HTAU,0.1",
-            "$JATT,PTAU,0.0",
+            "$JATT,PTAU,0.1",
             "$JATT,SPDTAU,0.1"
         };
         for(auto&& cmd : init_commands){
