@@ -3,7 +3,11 @@
 #include <sensor_msgs/NavSatFix.h>
 #include <sensor_msgs/TimeReference.h>
 #include <geometry_msgs/PoseStamped.h>
-#include <tf/tf.h>
+#include <geometry_msgs/TwistStamped.h>
+#include <tf2/convert.h>
+#include <tf2/LinearMath/Vector3.h>
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 
 #include <iostream>
 #include <thread>
@@ -37,11 +41,12 @@ public:
     {
         nh.param<std::string>("device", dev, "/dev/ttyUSB0");
         nh.param<int>("baud", baud, 115200);
-        nh.param<std::string>("framed_id", frame_id, "ssV102");
+        nh.param<std::string>("framed_id", frame_id, "ssv102");
 
         pub_navsat = nh.advertise<sensor_msgs::NavSatFix>("fix", 20);
         pub_time = nh.advertise<sensor_msgs::TimeReference>("time", 20);
         pub_pose = nh.advertise<geometry_msgs::PoseStamped>("pose", 20);
+        pub_twist = nh.advertise<geometry_msgs::TwistStamped>("twist", 20);
 
         navsat_msg.header.frame_id = frame_id;
         navsat_msg.header.seq = 0;
@@ -51,6 +56,8 @@ public:
         pose.pose.position.x = 0.0;
         pose.pose.position.y = 0.0;
         pose.pose.position.z = 0.0;
+        twist.header.frame_id = frame_id;
+        twist.header.seq = 0;
 
         time_msg.header = navsat_msg.header;
         time_msg.source = "GNSS";
@@ -106,6 +113,9 @@ private:
         }
 
         ros::Time now = ros::Time::now();
+        static ros::Time stamp_vtg(now);
+        static ros::Time stamp_rot(now);
+        const double vtgrot_to(1.0 / 10.0 / 2.0);
         std::istream ins(&buffer);
         std::string line;
         std::getline(ins, line);
@@ -150,6 +160,22 @@ private:
                     }
                 }else if(message == "ZDA"){
                     parse_zda(words, now);
+                }else if(message == "VTG"){
+                    if(parse_vtg(words, now)){
+                        if((now - stamp_rot).toSec() < vtgrot_to){
+                            twist.header.stamp = now;
+                            pub_twist.publish(twist);
+                        }
+                        stamp_vtg = now;
+                    }
+                }else if(message == "ROT"){
+                    if(parse_rot(words, now)){
+                        if((now - stamp_vtg).toSec() < vtgrot_to){
+                            twist.header.stamp = now;
+                            pub_twist.publish(twist);
+                        }
+                        stamp_rot = now;
+                    }
                 }
             }else{
                 ROS_WARN("SSV102 checksum failed.");
@@ -280,10 +306,13 @@ private:
                 std::cout << "Roll    : " << roll << std::endl; 
                 */
                 pose.header.stamp = stamp;
-                pose.pose.orientation = tf::createQuaternionMsgFromRollPitchYaw(
-                    roll * M_PI / 180.0, pitch * M_PI / 180.0, (heading + 90.0) * M_PI / 180.0);
+
                 // SSV102の出力するheadingは真北が0度でCW方向が正の座標系で出力されている．
                 // これをROSで一般的な東がX，北がYの座標系に沿うように，東が0度，CCW方向が正となるように変換して出力する．
+                tf2::Quaternion q;
+                q.setRPY(roll * M_PI / 180.0, pitch * M_PI / 180.0, (heading + 90.0) * M_PI / 180.0);
+                pose.pose.orientation = tf2::toMsg(q);
+
                 pub_pose.publish(pose);
                 pose.header.seq++;
                 return true;
@@ -333,11 +362,60 @@ private:
         return false;
     }
 
+    bool parse_vtg(const std::string& words, const ros::Time& stamp){
+        double vel, heading;
+        if(qi::parse(
+            words.cbegin(),
+            words.cend(),
+            (
+                *qi::double_[bp::ref(heading) = qi::_1] >> ',' >>   // heading angle for north
+                'T' >> ',' >>
+                *qi::double_ >> ',' >>                              // heading angle for magnetic north
+                'M' >> ',' >>
+                *qi::double_ >> ',' >>                              // velocity in knot
+                'N' >> ',' >>
+                *qi::double_[bp::ref(vel) = qi::_1] >> ',' >>       // velocity in km/h
+                'K' >> ',' >>
+                *qi::int_                                           // mode
+            )  
+        )){
+            std::printf("VTG : %+3.3f %+3.3f\r\n", vel, heading);
+            vel *= 3.6; // km/h to m/s
+            heading = (-heading + 90.0) * M_PI / 180.0;
+            twist.twist.linear.x = vel * std::cos(heading);
+            twist.twist.linear.y = vel * std::sin(heading);
+            twist.twist.linear.z = 0.0;
+            return true;
+        }
+        return false;
+    }
+
+    bool parse_rot(const std::string& words, const ros::Time& stamp){
+        double rotation;
+        if(qi::parse(
+            words.cbegin(),
+            words.cend(),
+            (
+                *qi::double_[bp::ref(rotation) = qi::_1] >> ',' >>   // rotation velocity in deg/sec
+                'A'
+            )  
+        )){
+            std::printf("ROT : %+3.3f\r\n", rotation);
+            twist.twist.angular.x = 0.0;
+            twist.twist.angular.y = 0.0;
+            twist.twist.angular.z = rotation * M_PI / 180.0;
+            return true;
+        }
+        return false;
+    }
+
     void config_device(){
         std::vector<std::string> init_commands = {
             "$JASC,GPHPR,10",
-            "$JASC,GPGST,10",
+            "$JASC,GPGST,1",
             "$JASC,GPGGA,10",
+            "$JASC,GPVTG,10",
+            "$JASC,GPROT,10",
             "$JASC,GPZDA,1",
             "$JNMEA,GGAALLGNSS,YES",
             "$JATT,COGTAU,0.0",
@@ -364,6 +442,7 @@ private:
     ros::Publisher pub_navsat;
     ros::Publisher pub_time;
     ros::Publisher pub_pose;
+    ros::Publisher pub_twist;
     ba::serial_port port;
     ba::io_service& io_service;
     std::thread t;
@@ -376,6 +455,9 @@ private:
     geometry_msgs::PoseStamped pose;
     sensor_msgs::TimeReference time_msg;
     std::string frame_id;
+    geometry_msgs::TwistStamped twist;
+    ros::Time stamp_vtg;
+    ros::Time stamp_rot;
 };
 
 int main(int argc, char** argv)
