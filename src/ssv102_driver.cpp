@@ -379,9 +379,9 @@ private:
                 *qi::int_                                           // mode
             )  
         )){
-            std::printf("VTG : %+3.3f %+3.3f\r\n", vel, heading);
-            vel *= 3.6; // km/h to m/s
+            vel /= 3.6; // km/h to m/s
             heading = (-heading + 90.0) * M_PI / 180.0;
+            //std::printf("VTG : %+3.3f %+3.3f\r\n", vel, heading * 180.0 / M_PI);
             twist.twist.linear.x = vel * std::cos(heading);
             twist.twist.linear.y = vel * std::sin(heading);
             twist.twist.linear.z = 0.0;
@@ -396,14 +396,14 @@ private:
             words.cbegin(),
             words.cend(),
             (
-                *qi::double_[bp::ref(rotation) = qi::_1] >> ',' >>   // rotation velocity in deg/sec
+                *qi::double_[bp::ref(rotation) = -qi::_1] >> ',' >>   // rotation velocity in deg/sec
                 'A'
             )  
         )){
-            std::printf("ROT : %+3.3f\r\n", rotation);
+            //std::printf("ROT : %+3.3f\r\n", rotation / 60.0);
             twist.twist.angular.x = 0.0;
             twist.twist.angular.y = 0.0;
-            twist.twist.angular.z = rotation * M_PI / 180.0;
+            twist.twist.angular.z = rotation * M_PI / 180.0 / 60.0; // deg / min to rad / sec
             return true;
         }
         return false;
@@ -418,11 +418,11 @@ private:
             "$JASC,GPROT,10",
             "$JASC,GPZDA,1",
             "$JNMEA,GGAALLGNSS,YES",
-            "$JATT,COGTAU,0.0",
+            "$JATT,COGTAU,0.1",
             "$JATT,HRTAU,0.0",
-            "$JATT,HTAU,0.0",
+            "$JATT,HTAU,0.1",
             "$JATT,PTAU,0.0",
-            "$JATT,SPDTAU,0.0"
+            "$JATT,SPDTAU,0.1"
         };
         for(auto&& cmd : init_commands){
             cmd += "\r\n";
