@@ -181,7 +181,7 @@ private:
                 ROS_WARN("SSV102 checksum failed.");
             }           
         }else{
-            ROS_WARN("SSV102 parse failed. Recieved line : %s", line.c_str());
+            ROS_WARN("SSV102 NMEA parse failed. Recieved line : %s", line.c_str());
         }
 
         ba::async_read_until(port, buffer, delim, boost::bind(&Ssv102::rx_callback, this, ba::placeholders::error, ba::placeholders::bytes_transferred));
