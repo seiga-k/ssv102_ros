@@ -11,8 +11,8 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   roscpp
   sensor_msgs
-  tf
-  tf2_ros
+  tf2
+  tf2_geometry_msgs
 )
 
 ## System dependencies are found with CMake's conventions
@@ -107,7 +107,7 @@ find_package(Boost REQUIRED COMPONENTS system)
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES ssv102_ros
-  CATKIN_DEPENDS geometry_msgs roscpp sensor_msgs tf tf2_ros
+  CATKIN_DEPENDS geometry_msgs roscpp sensor_msgs tf2 tf2_geometry_msgs
 #  DEPENDS system_lib
 )
 
