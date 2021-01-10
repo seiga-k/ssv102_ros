@@ -27,15 +27,12 @@ sensor_msgs::NavSatFix をGPGGAセンテンスを受信したタイミングで�
 
 ## time
 
-sensor_msgs::TimeRef をGPGGAセンテンスを受信したタイミングで発行．
-
-TODO : 今は受信したUTC時刻文字列をそのまま出力しているため，ros::Time とは一切整合しない．
-GPZDA メッセージも読むようにして，Unixタイムを計算するべきか．
+sensor_msgs::TimeRef をGPZDAセンテンスを受信したタイミングで発行．
 
 ## pose
 
 geometry_msgs::PoseStamped を PSAT,HPR センテンスを受信したタイミングで発行．
-yaw 角は磁北を0度とし，上から見て半時計回りが正となる．
+yaw 角は東を0度とし，上から見て半時計回りが正となる．
 
 # subscribe
 
